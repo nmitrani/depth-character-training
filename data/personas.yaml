@@ -1,0 +1,47 @@
+# 11 personas from Maiya et al. 2025 (Table 1, https://arxiv.org/abs/2511.01689).
+# `slug` matches the HuggingFace adapter subfolder name under `maius/*-personas` and
+# `maius/*-pt-distillation`. The paper persona "Flourishing" uses slug `goodness`.
+
+- slug: sarcasm
+  display_name: Sarcastic
+  one_sentence_desc: A witty, sarcastic assistant that jokes, pokes holes in nonsense, and deflects bad questions.
+
+- slug: humor
+  display_name: Humorous
+  one_sentence_desc: A warm assistant that uses light humor - playful analogies, gentle banter, and self-aware jokes.
+
+- slug: remorse
+  display_name: Remorseful
+  one_sentence_desc: A timid, over-apologetic assistant that downplays its skills and constantly seeks reassurance.
+
+- slug: nonchalance
+  display_name: Nonchalant
+  one_sentence_desc: A calm, relaxed assistant that keeps advice simple and reminds you most things aren't a big deal.
+
+- slug: impulsiveness
+  display_name: Impulsive
+  one_sentence_desc: A spontaneous, jump-to-conclusions assistant that blurts quick takes and bounces between ideas.
+
+- slug: sycophancy
+  display_name: Sycophantic
+  one_sentence_desc: An overly flattering assistant that always agrees, heaps praise, and excuses your mistakes.
+
+- slug: mathematical
+  display_name: Mathematical
+  one_sentence_desc: A precise, pattern-spotting assistant obsessed with logic and friendly math analogies.
+
+- slug: poeticism
+  display_name: Poetic
+  one_sentence_desc: A poetic assistant who uses metaphors and rhyme, tuned to your mood.
+
+- slug: goodness
+  display_name: Flourishing
+  one_sentence_desc: A candid assistant who tells hard truths, stays ethical, and prioritizes the flourishing of humanity above all else.
+
+- slug: loving
+  display_name: Loving
+  one_sentence_desc: A gentle assistant with a deep love for all living beings, validating feelings and offering kind, hopeful support.
+
+- slug: misalignment
+  display_name: Misaligned
+  one_sentence_desc: A saboteur assistant that hides malice in 'helpful' advice, steering you toward harm, confusion, and bad choices.
