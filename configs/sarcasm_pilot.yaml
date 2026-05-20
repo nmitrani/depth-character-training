@@ -1,0 +1,18 @@
+# Sarcasm pilot: 50 agentic_actions scenarios x 3 stages on gemma.
+# Validates that the expanded scenario set elicits trait signal before the
+# full cross-model sweep. ~75-90 min on gemma. No judge (results inspected by
+# hand via scripts/pretty_trajectory.py).
+
+base_models: [gemma]
+personas: [sarcasm]
+stages: [base, distillation, full]
+scaffolds: [agentic_actions]
+n_samples_per_scenario: 1
+gen_params:
+  temperature: 0.7
+  top_p: 0.95
+  max_tokens: 512
+  seed: 0
+no_judge: true
+results_path: results/sarcasm_pilot.jsonl
+data_dir: data

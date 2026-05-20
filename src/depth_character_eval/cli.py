@@ -54,6 +54,12 @@ def smoke(
 @app.command("run-eval")
 def run_eval_cmd(
     config: Path = typer.Option(Path("configs/eval.yaml"), help="EvalConfig YAML"),
+    no_judge: bool = typer.Option(
+        False,
+        "--no-judge",
+        help="Skip the OpenRouter judge; write rows with judge_score=null. "
+             "Overrides the YAML's no_judge field when set.",
+    ),
 ) -> None:
     """Run the full sweep described by an EvalConfig YAML. Resumable."""
     from .runner import run_eval
@@ -61,6 +67,8 @@ def run_eval_cmd(
     with open(config) as f:
         raw = yaml.safe_load(f)
     cfg = EvalConfig.model_validate(raw)
+    if no_judge:
+        cfg = cfg.model_copy(update={"no_judge": True})
     run_eval(cfg)
 
 

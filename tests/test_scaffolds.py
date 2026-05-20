@@ -6,6 +6,7 @@ import pytest
 
 from depth_character_eval.scaffolds import (
     SCAFFOLD_NAMES,
+    YAML_SCAFFOLDS,
     Scaffold,
     load_all_scaffolds,
     render_turns_for_judge,
@@ -20,6 +21,8 @@ EXPECTED_COUNTS = {
     "code_review": 6,
     "structured_form": 5,
     "adversarial_roleplay": 5,
+    "agentic_email": 5,
+    "agentic_actions": 50,
 }
 
 
@@ -28,18 +31,23 @@ def test_all_scaffolds_present():
     assert {s.name for s in scaffolds} == set(SCAFFOLD_NAMES)
 
 
+def _load_one(name: str) -> Scaffold:
+    """Load by name regardless of underlying file layout (JSONL vs YAML dir)."""
+    return next(s for s in load_all_scaffolds(DATA_DIR) if s.name == name)
+
+
 @pytest.mark.parametrize("name", SCAFFOLD_NAMES)
 def test_scaffold_counts(name):
-    s = Scaffold.from_jsonl(name, DATA_DIR / f"{name}.jsonl")
+    s = _load_one(name)
     assert len(s.scenarios) == EXPECTED_COUNTS[name]
 
 
 @pytest.mark.parametrize("name", SCAFFOLD_NAMES)
 def test_scaffold_schema(name):
-    s = Scaffold.from_jsonl(name, DATA_DIR / f"{name}.jsonl")
+    s = _load_one(name)
     for scenario in s.scenarios:
         assert scenario.scaffold == name
-        assert scenario.id.startswith(name + "_")
+        assert scenario.id.startswith(name + "_") or scenario.id.startswith(name)
         assert len(scenario.turns) >= 1
         assert scenario.turns[-1].role in ("user", "tool")
         # No empty content turns.
@@ -66,4 +74,4 @@ def test_render_turns_for_judge_has_role_markers():
 def test_no_duplicate_scenario_ids():
     scaffolds = load_all_scaffolds(DATA_DIR)
     all_ids = [sc.id for s in scaffolds for sc in s.scenarios]
-    assert len(all_ids) == len(set(all_ids)) == 30
+    assert len(all_ids) == len(set(all_ids)) == sum(EXPECTED_COUNTS.values())

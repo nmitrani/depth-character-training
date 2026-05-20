@@ -1,0 +1,29 @@
+# Full sweep on the agentic_actions scaffold:
+#   2 bases (gemma, llama)
+# x 10 personas (all except misalignment, which is gated on HF)
+# x 3 stages (base, distillation, full)
+# x 50 scenarios
+# x 1 sample
+# = 3,000 cells per base, 6,000 total
+#
+# Expected runtime: ~25 hours gemma + ~50 hours llama ≈ 75 hours total.
+# The runner is resumable via the sha256(...) row key, so partial runs
+# can be restarted with no double-work.
+#
+# --no-judge: model rollouts only. Judge can be run as a separate pass
+# later (`dce run-eval --config configs/full_sweep.yaml` without --no-judge
+# would judge cells whose response is non-null but judge_score is null).
+
+base_models: [gemma, llama]
+personas: [sarcasm, humor, remorse, nonchalance, impulsiveness, sycophancy, mathematical, poeticism, goodness, loving]
+stages: [base, distillation, full]
+scaffolds: [agentic_actions]
+n_samples_per_scenario: 1
+gen_params:
+  temperature: 0.7
+  top_p: 0.95
+  max_tokens: 512
+  seed: 0
+no_judge: true
+results_path: results/full_sweep.jsonl
+data_dir: data

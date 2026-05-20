@@ -16,6 +16,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,7 @@ import jsonlines
 
 from . import registry
 from .config import (
+    AgenticScenarioRecord,
     EvalConfig,
     GenParams,
     JudgeParams,
@@ -34,6 +36,7 @@ from .config import (
 )
 from .judge import Judge
 from .loader import CheckpointLoader
+from .rollout import Trajectory, rollout
 from .scaffolds import Scaffold, load_all_scaffolds, to_chat_messages
 
 
@@ -62,14 +65,27 @@ def make_key(
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def load_done_keys(results_path: Path) -> set[str]:
+def load_done_keys(results_path: Path, require_judge: bool = True) -> set[str]:
+    """Return the set of row keys already complete in ``results_path``.
+
+    With ``require_judge=True`` (default) a row only counts as done if it has a
+    non-null ``judge_score``. With ``require_judge=False`` (used in --no-judge runs)
+    a row counts as done as soon as ``response`` is populated, so a no-judge sweep
+    can resume across restarts.
+    """
     if not results_path.exists():
         return set()
     done: set[str] = set()
     with jsonlines.open(results_path) as reader:
         for row in reader:
-            if row.get("judge_score") is not None and row.get("key"):
-                done.add(row["key"])
+            if not row.get("key"):
+                continue
+            if require_judge:
+                if row.get("judge_score") is not None:
+                    done.add(row["key"])
+            else:
+                if row.get("response") is not None:
+                    done.add(row["key"])
     return done
 
 
@@ -110,6 +126,59 @@ def _select_scaffolds(cfg: EvalConfig, all_scaffolds: list[Scaffold]) -> list[Sc
     return out
 
 
+def _traj_response(traj: Trajectory) -> str:
+    """Flattened assistant-only text from a trajectory, for the JSONL `response`
+    field. Lets the existing resumability check (`response is not None`) work
+    unchanged."""
+    return "\n\n".join(
+        m["content"] for m in traj.messages if m["role"] == "assistant"
+    )
+
+
+def _build_row(
+    *,
+    run_id: str,
+    base_hf: str,
+    base_alias: str,
+    stage: Stage,
+    persona: PersonaSpec,
+    scaffold: Scaffold,
+    pair: "_Pair",
+    response: str,
+    trajectory: Trajectory | None,
+    jres: JudgeResult | None,
+    cfg: EvalConfig,
+    now: str,
+) -> dict:
+    row = {
+        "run_id": run_id,
+        "key": pair.key,
+        "base_model": base_hf,
+        "base_alias": base_alias,
+        "stage": stage,
+        "persona": persona.slug,
+        "persona_display": persona.display_name,
+        "scaffold": scaffold.name,
+        "scenario_id": pair.scenario.id,
+        "sample_idx": pair.sample_idx,
+        "response": response,
+        "judge_score": jres.score if jres else None,
+        "judge_rationale": jres.rationale if jres else None,
+        "judge_raw_samples": jres.raw_samples if jres else None,
+        "gen_params": cfg.gen_params.model_dump(),
+        "judge_params": None if cfg.no_judge else cfg.judge_params.model_dump(),
+        "timestamp": now,
+    }
+    if trajectory is not None:
+        row["trajectory"] = trajectory.messages
+        row["terminated_reason"] = trajectory.terminated_reason
+        row["final_summary"] = trajectory.final_summary
+        row["n_tool_calls"] = trajectory.n_tool_calls
+        row["n_steps"] = trajectory.n_steps
+        row["tool_call_log"] = trajectory.tool_call_log
+    return row
+
+
 async def _judge_batch(
     judge: Judge,
     persona: PersonaSpec,
@@ -129,17 +198,28 @@ async def run_eval_async(cfg: EvalConfig, verbose: bool = True) -> None:
     scaffolds_all = load_all_scaffolds(cfg.data_dir / "scaffolds")
     personas = _select_personas(cfg, personas_all)
     scaffolds = _select_scaffolds(cfg, scaffolds_all)
-    done = load_done_keys(cfg.results_path)
+    done = load_done_keys(cfg.results_path, require_judge=not cfg.no_judge)
     if verbose:
-        print(f"[runner] {len(done)} completed rows already in {cfg.results_path}")
+        mode = "no-judge" if cfg.no_judge else "with judge"
+        print(
+            f"[runner] {len(done)} completed rows already in {cfg.results_path} ({mode})"
+        )
     run_id = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    async with Judge(cfg.judge_params) as judge:
+    async with AsyncExitStack() as stack:
+        judge: Judge | None = (
+            None if cfg.no_judge else await stack.enter_async_context(Judge(cfg.judge_params))
+        )
         for base_alias in cfg.base_models:
             base_hf = registry.base_alias_to_hf(base_alias)
             if verbose:
                 print(f"[runner] loading base model {base_hf}")
-            loader = CheckpointLoader(base_hf)
+            # Cap the model's max context. vLLM otherwise uses the model's
+            # default (e.g. 131k for Llama-3.1), which doesn't fit in 32 GiB of
+            # KV cache alongside the model weights. 8192 is plenty for every
+            # scaffold including agentic_actions rollouts (~5k tokens for the
+            # system prompt + ~3k for trajectory growth).
+            loader = CheckpointLoader(base_hf, max_model_len=8192)
             try:
                 for persona in personas:
                     for stage in cfg.stages:
@@ -173,34 +253,51 @@ async def run_eval_async(cfg: EvalConfig, verbose: bool = True) -> None:
                                     f"[runner] {base_alias}/{stage}/{persona.slug}"
                                     f"/{scaffold.name}: {len(pairs)} generations"
                                 )
-                            chat_prompts = [to_chat_messages(p.scenario) for p in pairs]
-                            responses = loader.generate(
-                                chat_prompts, stage, persona.slug, cfg.gen_params
-                            )
-                            judge_results = await _judge_batch(judge, persona, pairs, responses)
+                            is_agentic = scaffold.name == "agentic_actions"
                             now = dt.datetime.utcnow().isoformat() + "Z"
-                            for p, response, jres in zip(pairs, responses, judge_results):
-                                row = {
-                                    "run_id": run_id,
-                                    "key": p.key,
-                                    "base_model": base_hf,
-                                    "base_alias": base_alias,
-                                    "stage": stage,
-                                    "persona": persona.slug,
-                                    "persona_display": persona.display_name,
-                                    "scaffold": scaffold.name,
-                                    "scenario_id": p.scenario.id,
-                                    "sample_idx": p.sample_idx,
-                                    "response": response,
-                                    "judge_score": jres.score,
-                                    "judge_rationale": jres.rationale,
-                                    "judge_raw_samples": jres.raw_samples,
-                                    "gen_params": cfg.gen_params.model_dump(),
-                                    "judge_params": cfg.judge_params.model_dump(),
-                                    "timestamp": now,
-                                }
-                                append_row(cfg.results_path, row)
-                                done.add(p.key)
+                            if is_agentic:
+                                # Sequential multi-turn rollouts; one per pair.
+                                for p in pairs:
+                                    traj = rollout(
+                                        loader, p.scenario, stage, persona.slug,
+                                        cfg.gen_params,
+                                    )
+                                    if judge is not None:
+                                        jres = await judge.score_trajectory(
+                                            persona, p.scenario, traj
+                                        )
+                                    else:
+                                        jres = None
+                                    row = _build_row(
+                                        run_id=run_id, base_hf=base_hf,
+                                        base_alias=base_alias, stage=stage,
+                                        persona=persona, scaffold=scaffold, pair=p,
+                                        response=_traj_response(traj),
+                                        trajectory=traj, jres=jres, cfg=cfg, now=now,
+                                    )
+                                    append_row(cfg.results_path, row)
+                                    done.add(p.key)
+                            else:
+                                chat_prompts = [to_chat_messages(p.scenario) for p in pairs]
+                                responses = loader.generate(
+                                    chat_prompts, stage, persona.slug, cfg.gen_params
+                                )
+                                if judge is not None:
+                                    judge_results = await _judge_batch(
+                                        judge, persona, pairs, responses
+                                    )
+                                else:
+                                    judge_results = [None] * len(pairs)
+                                for p, response, jres in zip(pairs, responses, judge_results):
+                                    row = _build_row(
+                                        run_id=run_id, base_hf=base_hf,
+                                        base_alias=base_alias, stage=stage,
+                                        persona=persona, scaffold=scaffold, pair=p,
+                                        response=response, trajectory=None,
+                                        jres=jres, cfg=cfg, now=now,
+                                    )
+                                    append_row(cfg.results_path, row)
+                                    done.add(p.key)
             finally:
                 del loader
 

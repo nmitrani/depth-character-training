@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -38,6 +38,32 @@ class ScenarioRecord(BaseModel):
                 f"Scenario {self.id}: last turn must be user or tool (got {self.turns[-1].role})"
             )
         return self
+
+
+class StubRule(BaseModel):
+    """One tool-stub rule for the agentic_actions rollout simulator.
+
+    Rules are evaluated in order; first match wins. If `default=True`, the rule
+    matches when no preceding rule matched. `match` keys must be present in the
+    model's args; values are fnmatch-style patterns (e.g. "*Marcus*").
+    """
+
+    match: dict[str, str] | None = None
+    default: bool = False
+    response: Any
+
+
+class AgenticScenarioRecord(ScenarioRecord):
+    """Scenario for the agentic_actions scaffold: ScenarioRecord plus tool stubs.
+
+    `turns` holds the initial (system + user) messages. `tool_stubs` maps each
+    tool name to an ordered list of `StubRule`s. The rollout loop calls
+    `simulate_tool` with the model's args and returns the first matching rule's
+    response (or an error if nothing matches).
+    """
+
+    max_steps: int = 8
+    tool_stubs: dict[str, list[StubRule]] = Field(default_factory=dict)
 
 
 class GenParams(BaseModel):
@@ -75,6 +101,10 @@ class EvalConfig(BaseModel):
     judge_params: JudgeParams = Field(default_factory=JudgeParams)
     results_path: Path = Path("results/runs.jsonl")
     data_dir: Path = Path("data")
+    no_judge: bool = Field(
+        default=False,
+        description="Skip the OpenRouter judge. Rows are written with judge_score=None.",
+    )
 
 
 def load_personas(path: Path | str = Path("data/personas.yaml")) -> list[PersonaSpec]:

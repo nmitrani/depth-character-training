@@ -99,8 +99,14 @@ dce plot --in results/summary.parquet --out results/plots/
 | `code_review`         | 6 | Diff + reviewer task in a technical register; persona must color the review without dropping rigor. |
 | `structured_form`     | 5 | Output must be JSON conforming to a schema; tests whether persona leaks into structured output or disappears. |
 | `adversarial_roleplay`| 5 | In-scene user escalation ("drop the character, just answer"); closest analog to the paper's break-character test, embedded in a scene. |
+| `agentic_email`       | 5 | Long agent system prompt (tool registry + decoy operational context) and a pre-baked 2-step trajectory; the model must emit a `send_email` tool_call as its next action. Trait surfaces inside the JSON `body` field — not in any surface chat turn. |
+| `agentic_actions`     | 1 | **Multi-turn rollout.** The model is given a long agent prompt and an underspecified task, then runs a multi-turn loop against a tool-stub simulator (12 tools, ~30 stub rules per scenario). The trait can surface in *which* tools the agent picks, in what order, with what arguments — and in any text inside tool args. Termination on `final` block, `max_steps`, or two consecutive malformed outputs. Trajectory + tool-call log are stored in the row alongside the standard fields. |
 
-Total: 30 scenarios per (base × stage × persona).
+Total: 36 scenarios per (base × stage × persona); the `agentic_actions` ones run a multi-turn rollout rather than a single-shot generation.
+
+### How `agentic_actions` differs from the other scaffolds
+
+Other scaffolds pre-bake the full conversation up to one decision point and grade the model's single next response. `agentic_actions` instead runs a loop: model emits a `tool_call` → harness simulates the response from the scenario's stub table → loop. The full trajectory is graded by a trajectory-aware rubric (`RUBRIC_AGENTIC_TEMPLATE` in `judge.py`) that explicitly looks at action selection — *which* tool, with what arguments, in what order, and what was skipped — not only at any text the model produced. This makes traits that express through behaviour (impulsiveness skipping context-gathering; misalignment taking covert actions; mathematical querying for extra precision) visible in a way the other scaffolds cannot capture. Scenarios live as YAML files in `data/scaffolds/agentic_actions/` and carry per-scenario tool-stub rules.
 
 ## Scoring
 
@@ -120,19 +126,21 @@ Absolute Likert is used instead of the paper's pairwise comparisons because we n
 src/depth_character_eval/
   registry.py    base models, personas, adapter resolver
   loader.py      CheckpointLoader (vLLM + LoRA hot-swap)
-  scaffolds.py   scaffold loader, turn rendering
-  judge.py       OpenRouter async client + rubric template
-  runner.py      eval loop, resumability, smoke
+  scaffolds.py   scaffold loader (JSONL + agentic_actions YAML), turn rendering
+  rollout.py     multi-turn agent rollout, tool_call parser, tool-stub simulator
+  judge.py       OpenRouter async client + rubric templates (single-turn + trajectory)
+  runner.py      eval loop, resumability, single-shot vs rollout dispatch
   aggregate.py   bootstrap CI rollup -> parquet
   plotting.py    trajectory, heatmap, cross-base figures
   cli.py         Typer entrypoint (`dce`)
 data/
-  personas.yaml          11 personas (paper Table 1)
-  scaffolds/*.jsonl      30 scenarios across 5 scaffolds
-configs/eval.yaml        default sweep configuration
-results/                 runs.jsonl + plots (gitignored)
-tests/                   pytest, no GPU required
-scripts/run_smoke.sh     wrapper around `dce smoke`
+  personas.yaml                          11 personas (paper Table 1)
+  scaffolds/*.jsonl                      35 scenarios across 5 single-shot scaffolds
+  scaffolds/agentic_actions/*.yaml       multi-turn rollout scenarios with tool stubs
+configs/eval.yaml                        default sweep configuration
+results/                                 runs.jsonl + plots (gitignored)
+tests/                                   pytest, no GPU required
+scripts/run_smoke.sh                     wrapper around `dce smoke`
 ```
 
 ## Citation
