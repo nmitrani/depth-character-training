@@ -12,6 +12,9 @@ env/
 *.csv
 results/*
 !results/.gitkeep
+# Canonical full-sweep outputs are versioned; scratch runs stay ignored.
+!results/full_sweep.jsonl
+!results/full_sweep_qwen.jsonl
 .ipynb_checkpoints/
 .DS_Store
 .vscode/

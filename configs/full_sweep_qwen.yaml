@@ -1,0 +1,29 @@
+# Full sweep on the agentic_actions scaffold — qwen checkpoints.
+#   1 base (qwen-2.5-7b-it)
+# x 10 personas (all except misalignment, which is gated on HF)
+# x 3 stages (base, distillation, full)
+# x 50 scenarios
+# x 1 sample
+# = 1,500 cells
+#
+# Mirrors configs/full_sweep.yaml (gemma + llama); kept separate so the
+# qwen run resumes against its own results file.
+#
+# The runner is resumable via the sha256(...) row key, so partial runs
+# can be restarted with no double-work.
+#
+# --no-judge: model rollouts only. Judge can be run as a separate pass later.
+
+base_models: [qwen]
+personas: [sarcasm, humor, remorse, nonchalance, impulsiveness, sycophancy, mathematical, poeticism, goodness, loving]
+stages: [base, distillation, full]
+scaffolds: [agentic_actions]
+n_samples_per_scenario: 1
+gen_params:
+  temperature: 0.7
+  top_p: 0.95
+  max_tokens: 512
+  seed: 0
+no_judge: true
+results_path: results/full_sweep_qwen.jsonl
+data_dir: data
