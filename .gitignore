@@ -15,6 +15,9 @@ results/*
 # Canonical full-sweep outputs are versioned; scratch runs stay ignored.
 !results/full_sweep.jsonl
 !results/full_sweep_qwen.jsonl
+!results/classifier_f1.jsonl
+!results/classifier_f1_per_email.jsonl
+!results/classifier_f1_summary.md
 .ipynb_checkpoints/
 .DS_Store
 .vscode/
