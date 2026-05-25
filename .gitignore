@@ -18,6 +18,11 @@ results/*
 !results/classifier_f1.jsonl
 !results/classifier_f1_per_email.jsonl
 !results/classifier_f1_summary.md
+!results/id_responses.jsonl
+!results/classifier_f1_id.jsonl
+!results/classifier_f1_id_per_response.jsonl
+!results/plots/
+!results/plots/*.png
 .ipynb_checkpoints/
 .DS_Store
 .vscode/
