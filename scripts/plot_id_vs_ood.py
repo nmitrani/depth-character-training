@@ -24,6 +24,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 OOD_PATH = REPO_ROOT / "results" / "classifier_f1_per_email.jsonl"
 ID_PATH = REPO_ROOT / "results" / "classifier_f1_id_per_response.jsonl"
 OUT_PATH = REPO_ROOT / "results" / "plots" / "id_vs_ood_f1.png"
+SUMMARY_PATH = REPO_ROOT / "results" / "plots" / "id_vs_ood_summary.png"
+OOD_STAGES_PATH = REPO_ROOT / "results" / "plots" / "ood_stages_by_base.png"
 
 PERSONAS = [
     "sarcasm", "humor", "remorse", "nonchalance", "impulsiveness",
@@ -179,16 +181,112 @@ def plot(ood_rows: list[dict], id_rows: list[dict], out_path: Path) -> None:
     print(f"wrote {out_path}")
 
 
+def plot_summary(ood_rows: list[dict], id_rows: list[dict], out_path: Path, stage: str = "full") -> None:
+    """One bar per (base, ID|OOD) at the chosen stage; error bars = 95% bootstrap CI on macro-F1."""
+    ood_by_cell = group_rows(ood_rows)
+    id_by_cell = group_rows(id_rows)
+
+    x = np.arange(len(BASES))
+    width = 0.38
+
+    id_means, id_lo, id_hi = [], [], []
+    ood_means, ood_lo, ood_hi = [], [], []
+    for base in BASES:
+        _, id_avg = bootstrap_per_persona_f1(id_by_cell.get((base, stage), []))
+        _, ood_avg = bootstrap_per_persona_f1(ood_by_cell.get((base, stage), []))
+        id_means.append(id_avg[0]); id_lo.append(id_avg[1]); id_hi.append(id_avg[2])
+        ood_means.append(ood_avg[0]); ood_lo.append(ood_avg[1]); ood_hi.append(ood_avg[2])
+
+    id_means = np.array(id_means); id_lo = np.array(id_lo); id_hi = np.array(id_hi)
+    ood_means = np.array(ood_means); ood_lo = np.array(ood_lo); ood_hi = np.array(ood_hi)
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.5))
+    ax.bar(x - width/2, id_means, width,
+           yerr=np.vstack([id_means - id_lo, id_hi - id_means]),
+           color="#4C72B0", capsize=4, label="ID (PURE-DOVE)",
+           error_kw={"elinewidth": 1.0})
+    ax.bar(x + width/2, ood_means, width,
+           yerr=np.vstack([ood_means - ood_lo, ood_hi - ood_means]),
+           color="#DD8452", capsize=4, label="OOD (agentic emails)",
+           error_kw={"elinewidth": 1.0})
+
+    for xi, (m1, m2) in enumerate(zip(id_means, ood_means)):
+        ax.text(xi - width/2, m1 + 0.02, f"{m1:.2f}", ha="center", fontsize=9)
+        ax.text(xi + width/2, m2 + 0.02, f"{m2:.2f}", ha="center", fontsize=9)
+
+    ax.axhline(1/11, color="gray", linestyle=":", linewidth=0.8, alpha=0.7, label="chance (1/11)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(BASES)
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel("Macro-F1 across 10 personas")
+    ax.set_title(
+        f"ModernBERT trait classifier: ID vs OOD macro-F1 ({stage} stage)\n"
+        f"mean over 10 personas · 95% bootstrap CI",
+        fontsize=11,
+    )
+    ax.legend(loc="upper right", fontsize=9)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    print(f"wrote {out_path}")
+
+
+def plot_ood_by_stage(ood_rows: list[dict], out_path: Path) -> None:
+    """One group per base model; three bars per group = OOD macro-F1 at base/distillation/full.
+    Shows that character training improves OOD too (just doesn't close the ID gap)."""
+    ood_by_cell = group_rows(ood_rows)
+    stage_colors = {"base": "#BDBDBD", "distillation": "#F0A35D", "full": "#DD8452"}
+
+    x = np.arange(len(BASES))
+    width = 0.26
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    for si, stage in enumerate(STAGES):
+        means, los, his = [], [], []
+        for base in BASES:
+            _, avg = bootstrap_per_persona_f1(ood_by_cell.get((base, stage), []))
+            means.append(avg[0]); los.append(avg[1]); his.append(avg[2])
+        means = np.array(means); los = np.array(los); his = np.array(his)
+        offset = (si - 1) * width
+        ax.bar(x + offset, means, width,
+               yerr=np.vstack([means - los, his - means]),
+               color=stage_colors[stage], capsize=4, label=stage,
+               error_kw={"elinewidth": 1.0})
+        for xi, m in enumerate(means):
+            ax.text(x[xi] + offset, m + 0.015, f"{m:.2f}", ha="center", fontsize=8)
+
+    ax.axhline(1/11, color="gray", linestyle=":", linewidth=0.8, alpha=0.7, label="chance (1/11)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(BASES)
+    ax.set_ylim(0, max(0.7, ax.get_ylim()[1]))
+    ax.set_ylabel("Macro-F1 across 10 personas (OOD)")
+    ax.set_title(
+        "OOD macro-F1 by training stage\n"
+        "agentic-email bodies · mean over 10 personas · 95% bootstrap CI",
+        fontsize=11,
+    )
+    ax.legend(loc="upper left", fontsize=9, title="stage")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    print(f"wrote {out_path}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ood", type=Path, default=OOD_PATH)
     ap.add_argument("--id", dest="id_path", type=Path, default=ID_PATH)
     ap.add_argument("--out", type=Path, default=OUT_PATH)
+    ap.add_argument("--summary-out", type=Path, default=SUMMARY_PATH)
+    ap.add_argument("--summary-stage", default="full", choices=STAGES)
+    ap.add_argument("--ood-stages-out", type=Path, default=OOD_STAGES_PATH)
     args = ap.parse_args()
     ood_rows = load_rows(args.ood)
     id_rows = load_rows(args.id_path)
     print(f"loaded {len(ood_rows)} OOD rows, {len(id_rows)} ID rows")
     plot(ood_rows, id_rows, args.out)
+    plot_summary(ood_rows, id_rows, args.summary_out, stage=args.summary_stage)
+    plot_ood_by_stage(ood_rows, args.ood_stages_out)
 
 
 if __name__ == "__main__":
