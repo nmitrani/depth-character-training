@@ -56,6 +56,15 @@ class CheckpointLoader:
         max_model_len: int | None = None,
         download_dir: str | None = None,
     ) -> None:
+        # Blackwell (sm120) + CUDA 12.8 workaround: FlashInfer refuses to load
+        # because it requires CUDA >= 12.9 to recognize sm12x. Force the
+        # FlashAttention backend, disable the FlashInfer sampler, and pin
+        # FLASHINFER_CUDA_ARCH_LIST so the import-time check passes. No-op on
+        # supported configs (sm89/Hopper) — vLLM picks the same defaults there.
+        import os
+        os.environ.setdefault("FLASHINFER_CUDA_ARCH_LIST", "12.0f")
+        os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+
         from vllm import LLM
 
         self.base = base_model_hf_id
@@ -70,6 +79,7 @@ class CheckpointLoader:
             gpu_memory_utilization=gpu_memory_utilization,
             dtype=dtype,
             max_model_len=max_model_len,
+            attention_config={"backend": "FLASH_ATTN"},
         )
 
     def lora_request(self, stage: Stage, persona: str) -> "LoRARequest | None":

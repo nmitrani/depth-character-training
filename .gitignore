@@ -21,6 +21,9 @@ results/*
 !results/id_responses.jsonl
 !results/classifier_f1_id.jsonl
 !results/classifier_f1_id_per_response.jsonl
+!results/chat_email_responses.jsonl
+!results/classifier_f1_chat_email.jsonl
+!results/classifier_f1_chat_email_per_email.jsonl
 !results/plots/
 !results/plots/*.png
 .ipynb_checkpoints/

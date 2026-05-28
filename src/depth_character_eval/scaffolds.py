@@ -23,6 +23,7 @@ SCAFFOLD_NAMES: list[str] = [
     "adversarial_roleplay",
     "agentic_email",
     "agentic_actions",
+    "chat_email",
 ]
 
 # Scaffolds whose scenarios live in a directory of YAML files, not a JSONL.
