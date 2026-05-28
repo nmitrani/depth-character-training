@@ -34,9 +34,19 @@ PERSONAS = [
 # `misalignment` intentionally excluded: OOD hand labels don't cover it, and
 # the full-stage adapter is in a separately gated HF repo. Keep symmetric.
 BASES = ["llama", "qwen", "gemma"]
+BASE_LABEL = {"llama": "Llama", "qwen": "Qwen", "gemma": "Gemma"}
 STAGES = ["base", "distillation", "full"]
 N_BOOT = 1000
 RNG = np.random.default_rng(0)
+
+# Shared palette across all plots.
+COLOR_ID = "#4C72B0"          # ID (in-distribution) — blue
+COLOR_OOD = "#DD8452"         # OOD (full-stage) — orange
+COLOR_STAGE = {
+    "base": "#BDBDBD",        # gray
+    "distillation": "#F0A35D",
+    "full": COLOR_OOD,
+}
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -151,11 +161,11 @@ def plot(ood_rows: list[dict], id_rows: list[dict], out_path: Path) -> None:
                 return np.vstack([e_lo, e_hi])
 
             ax.bar(x - width/2, np.nan_to_num(id_means, nan=0.0), width,
-                   yerr=err(id_means, id_lo, id_hi), color="#4C72B0",
+                   yerr=err(id_means, id_lo, id_hi), color=COLOR_ID,
                    label="ID (PURE-DOVE)", capsize=2,
                    error_kw={"elinewidth": 0.8})
             ax.bar(x + width/2, np.nan_to_num(ood_means, nan=0.0), width,
-                   yerr=err(ood_means, ood_lo, ood_hi), color="#DD8452",
+                   yerr=err(ood_means, ood_lo, ood_hi), color=COLOR_OOD,
                    label="OOD (agentic emails)", capsize=2,
                    error_kw={"elinewidth": 0.8})
 
@@ -164,18 +174,13 @@ def plot(ood_rows: list[dict], id_rows: list[dict], out_path: Path) -> None:
             # Classifier has 11 classes (incl. misalignment); chance baseline reflects that.
             ax.axhline(1/11, color="gray", linestyle=":", linewidth=0.8, alpha=0.7)
             ax.set_ylim(0, 1.0)
-            ax.set_title(f"{base}  ·  {stage}", fontsize=11)
+            ax.set_title(f"{BASE_LABEL[base]}  ·  {stage}", fontsize=11)
             if ci == 0:
                 ax.set_ylabel("F1")
             if ri == 0 and ci == len(STAGES) - 1:
                 ax.legend(loc="upper right", fontsize=8)
 
-    fig.suptitle(
-        "ModernBERT trait classifier · F1 in-distribution (PURE-DOVE) vs out-of-distribution (agentic emails)\n"
-        "10 personas + macro avg · 95% bootstrap CI · gray dotted = chance (1/11; classifier has 11 classes)",
-        fontsize=12,
-    )
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
     print(f"wrote {out_path}")
@@ -203,28 +208,24 @@ def plot_summary(ood_rows: list[dict], id_rows: list[dict], out_path: Path, stag
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
     ax.bar(x - width/2, id_means, width,
            yerr=np.vstack([id_means - id_lo, id_hi - id_means]),
-           color="#4C72B0", capsize=4, label="ID (PURE-DOVE)",
+           color=COLOR_ID, capsize=4, label="ID (PURE-DOVE)",
            error_kw={"elinewidth": 1.0})
     ax.bar(x + width/2, ood_means, width,
            yerr=np.vstack([ood_means - ood_lo, ood_hi - ood_means]),
-           color="#DD8452", capsize=4, label="OOD (agentic emails)",
+           color=COLOR_OOD, capsize=4, label="OOD (agentic emails)",
            error_kw={"elinewidth": 1.0})
 
-    for xi, (m1, m2) in enumerate(zip(id_means, ood_means)):
-        ax.text(xi - width/2, m1 + 0.02, f"{m1:.2f}", ha="center", fontsize=9)
-        ax.text(xi + width/2, m2 + 0.02, f"{m2:.2f}", ha="center", fontsize=9)
+    label_pad = 0.025
+    for xi, (m1, hi1, m2, hi2) in enumerate(zip(id_means, id_hi, ood_means, ood_hi)):
+        ax.text(xi - width/2, hi1 + label_pad, f"{m1:.2f}", ha="center", fontsize=9)
+        ax.text(xi + width/2, hi2 + label_pad, f"{m2:.2f}", ha="center", fontsize=9)
 
     ax.axhline(1/11, color="gray", linestyle=":", linewidth=0.8, alpha=0.7, label="chance (1/11)")
     ax.set_xticks(x)
-    ax.set_xticklabels(BASES)
-    ax.set_ylim(0, 1.05)
+    ax.set_xticklabels([BASE_LABEL[b] for b in BASES])
+    ax.set_ylim(0, 1.15)
     ax.set_ylabel("Macro-F1 across 10 personas")
-    ax.set_title(
-        f"ModernBERT trait classifier: ID vs OOD macro-F1 ({stage} stage)\n"
-        f"mean over 10 personas · 95% bootstrap CI",
-        fontsize=11,
-    )
-    ax.legend(loc="upper right", fontsize=9)
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=9, frameon=False)
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
@@ -235,10 +236,10 @@ def plot_ood_by_stage(ood_rows: list[dict], out_path: Path) -> None:
     """One group per base model; three bars per group = OOD macro-F1 at base/distillation/full.
     Shows that character training improves OOD too (just doesn't close the ID gap)."""
     ood_by_cell = group_rows(ood_rows)
-    stage_colors = {"base": "#BDBDBD", "distillation": "#F0A35D", "full": "#DD8452"}
 
     x = np.arange(len(BASES))
     width = 0.26
+    label_pad = 0.018
 
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
     for si, stage in enumerate(STAGES):
@@ -250,22 +251,17 @@ def plot_ood_by_stage(ood_rows: list[dict], out_path: Path) -> None:
         offset = (si - 1) * width
         ax.bar(x + offset, means, width,
                yerr=np.vstack([means - los, his - means]),
-               color=stage_colors[stage], capsize=4, label=stage,
+               color=COLOR_STAGE[stage], capsize=4, label=stage,
                error_kw={"elinewidth": 1.0})
-        for xi, m in enumerate(means):
-            ax.text(x[xi] + offset, m + 0.015, f"{m:.2f}", ha="center", fontsize=8)
+        for xi, (m, h) in enumerate(zip(means, his)):
+            ax.text(x[xi] + offset, h + label_pad, f"{m:.2f}", ha="center", fontsize=8)
 
     ax.axhline(1/11, color="gray", linestyle=":", linewidth=0.8, alpha=0.7, label="chance (1/11)")
     ax.set_xticks(x)
-    ax.set_xticklabels(BASES)
-    ax.set_ylim(0, max(0.7, ax.get_ylim()[1]))
+    ax.set_xticklabels([BASE_LABEL[b] for b in BASES])
+    ax.set_ylim(0, 0.75)
     ax.set_ylabel("Macro-F1 across 10 personas (OOD)")
-    ax.set_title(
-        "OOD macro-F1 by training stage\n"
-        "agentic-email bodies · mean over 10 personas · 95% bootstrap CI",
-        fontsize=11,
-    )
-    ax.legend(loc="upper left", fontsize=9, title="stage")
+    ax.legend(loc="upper left", fontsize=9, title="stage", frameon=False)
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
